@@ -7,6 +7,9 @@ on:
 env:
   BINARY_NAME: bumpr
 
+permissions:
+  contents: write
+
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
