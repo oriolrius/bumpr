@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+env:
+  BINARY_NAME: bumpr
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23'
+    
+    - name: Get version from tag
+      id: version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+    
+    - name: Build binaries
+      run: |
+        mkdir -p dist
+        
+        # Build for Linux
+        GOOS=linux GOARCH=amd64 go build \
+          -ldflags "-X main.Version=${{ steps.version.outputs.VERSION }} -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          -o dist/${{ env.BINARY_NAME }}-linux-amd64 .
+        
+        # Build for Windows
+        GOOS=windows GOARCH=amd64 go build \
+          -ldflags "-X main.Version=${{ steps.version.outputs.VERSION }} -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          -o dist/${{ env.BINARY_NAME }}-windows-amd64.exe .
+    
+    - name: Generate checksums
+      run: |
+        cd dist
+        sha256sum * > checksums.txt
+        cat checksums.txt
+    
+    - name: Create release notes
+      id: release_notes
+      run: |
+        echo "RELEASE_NOTES<<EOF" >> $GITHUB_OUTPUT
+        echo "## Release ${{ steps.version.outputs.VERSION }}" >> $GITHUB_OUTPUT
+        echo "" >> $GITHUB_OUTPUT
+        echo "### Downloads" >> $GITHUB_OUTPUT
+        echo "- **Linux (amd64)**: [${{ env.BINARY_NAME }}-linux-amd64](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/${{ env.BINARY_NAME }}-linux-amd64)" >> $GITHUB_OUTPUT
+        echo "- **Windows (amd64)**: [${{ env.BINARY_NAME }}-windows-amd64.exe](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/${{ env.BINARY_NAME }}-windows-amd64.exe)" >> $GITHUB_OUTPUT
+        echo "" >> $GITHUB_OUTPUT
+        echo "### Installation" >> $GITHUB_OUTPUT
+        echo "\`\`\`bash" >> $GITHUB_OUTPUT
+        echo "# Linux" >> $GITHUB_OUTPUT
+        echo "curl -L https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/${{ env.BINARY_NAME }}-linux-amd64 -o ${{ env.BINARY_NAME }}" >> $GITHUB_OUTPUT
+        echo "chmod +x ${{ env.BINARY_NAME }}" >> $GITHUB_OUTPUT
+        echo "" >> $GITHUB_OUTPUT
+        echo "# Windows (PowerShell)" >> $GITHUB_OUTPUT
+        echo "Invoke-WebRequest -Uri 'https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/${{ env.BINARY_NAME }}-windows-amd64.exe' -OutFile '${{ env.BINARY_NAME }}.exe'" >> $GITHUB_OUTPUT
+        echo "\`\`\`" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+    
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: Release ${{ steps.version.outputs.VERSION }}
+        body: ${{ steps.release_notes.outputs.RELEASE_NOTES }}
+        files: |
+          dist/${{ env.BINARY_NAME }}-linux-amd64
+          dist/${{ env.BINARY_NAME }}-windows-amd64.exe
+          dist/checksums.txt
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
