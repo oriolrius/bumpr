@@ -8,6 +8,7 @@ A cross-platform CLI tool for automated software releases that handles version b
 - 📄 Multiple version source support:
   - `pyproject.toml` (Python projects)
   - `package.json` (Node.js projects)
+  - `galaxy.yml` (Ansible roles and collections)
   - `.version` (plain text files)
 - 🔍 Auto-detection of version source files
 - 🏷️ Git tag creation and pushing
@@ -125,6 +126,17 @@ version = "1.0.0"
 
 ```
 1.0.0
+```
+
+### galaxy.yml
+
+```yaml
+namespace: my_namespace
+name: my_collection
+version: "1.0.0"
+readme: README.md
+authors:
+  - Your Name
 ```
 
 ## How It Works

@@ -15,6 +15,7 @@ func NewDetector() *Detector {
 		sources: []VersionSource{
 			NewPyProjectSource(),
 			NewPackageJsonSource(),
+			NewGalaxySource(),
 			NewVersionFileSource(),
 		},
 	}
@@ -53,6 +54,10 @@ func (d *Detector) GetSourceByFile(filePath string) (VersionSource, error) {
 	case ".json":
 		if fileName == "package.json" {
 			return NewPackageJsonSource(), nil
+		}
+	case ".yml", ".yaml":
+		if fileName == "galaxy.yml" || fileName == "galaxy.yaml" {
+			return NewGalaxySource(), nil
 		}
 	}
 
