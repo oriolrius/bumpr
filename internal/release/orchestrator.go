@@ -110,6 +110,22 @@ func (o *Orchestrator) Execute(options Options) error {
 		if !options.Quiet {
 			fmt.Printf("💾 Committed: %s\n", commitMessage)
 		}
+
+		// Push commit to origin
+		if !options.NoPush {
+			branch, err := o.gitCmd.CurrentBranch()
+			if err != nil {
+				return fmt.Errorf("failed to get current branch: %w", err)
+			}
+
+			if err := o.gitCmd.Push(branch); err != nil {
+				return fmt.Errorf("failed to push commit: %w", err)
+			}
+
+			if !options.Quiet {
+				fmt.Printf("📤 Pushed commit to origin/%s\n", branch)
+			}
+		}
 	}
 
 	// Tag operations
@@ -129,12 +145,28 @@ func (o *Orchestrator) Execute(options Options) error {
 	}
 
 	if !options.NoPush {
-		if err := o.gitCmd.PushTag(newVersion); err != nil {
+		// Force push the tag to ensure it's updated if it already existed
+		if err := o.gitCmd.PushTagWithForce(newVersion); err != nil {
 			return fmt.Errorf("failed to push tag: %w", err)
 		}
 
 		if !options.Quiet {
-			fmt.Printf("📤 Pushed tag: %s\n", newVersion)
+			fmt.Printf("📤 Pushed tag: %s (forced)\n", newVersion)
+		}
+
+		// Create GitHub release
+		if o.githubCmd.IsAvailable() {
+			if err := o.createGitHubRelease(newVersion, options); err != nil {
+				if !options.Quiet {
+					fmt.Printf("⚠️  Warning: failed to create GitHub release: %v\n", err)
+					fmt.Println("   The tag has been pushed, so the workflow will still run.")
+				}
+			} else if !options.Quiet {
+				fmt.Printf("🎉 Created GitHub release for %s\n", newVersion)
+			}
+		} else if !options.Quiet {
+			fmt.Println("ℹ️  GitHub CLI (gh) not found. Skipping release creation.")
+			fmt.Println("   Install it with: https://cli.github.com/")
 		}
 	}
 
@@ -211,12 +243,26 @@ func (o *Orchestrator) showDryRunCommands(sourceFile, newVersion string, options
 	if !options.NoCommit {
 		fmt.Printf("→ git add %s\n", sourceFile)
 		fmt.Printf("→ git commit -m \"releasing %s\"\n", newVersion)
+		
+		if !options.NoPush {
+			fmt.Println("→ git push origin <current-branch>")
+		}
+	}
+	
+	// Tag cleanup if exists
+	fmt.Printf("→ git tag -d %s (if exists)\n", newVersion)
+	if !options.NoPush {
+		fmt.Printf("→ git push origin --delete %s (if exists)\n", newVersion)
 	}
 	
 	fmt.Printf("→ git tag -a %s -m \"Release: %s\"\n", newVersion, newVersion)
 	
 	if !options.NoPush {
-		fmt.Printf("→ git push origin %s\n", newVersion)
+		fmt.Printf("→ git push origin %s --force\n", newVersion)
+		
+		if o.githubCmd.IsAvailable() {
+			fmt.Printf("→ gh release create %s --title \"Release %s\" --notes \"...\"\n", newVersion, newVersion)
+		}
 	}
 	
 	fmt.Println()
@@ -231,20 +277,30 @@ func (o *Orchestrator) showSuccessMessage(newVersion string, options Options) {
 	fmt.Println()
 	fmt.Printf("✅ Successfully released %s\n", newVersion)
 	fmt.Println()
-	fmt.Println("Next steps:")
-	
-	if !options.NoCommit && options.NoPush {
-		fmt.Println("1. Push the commit to origin: git push origin")
-	} else if !options.NoCommit {
-		branch, _ := o.gitCmd.CurrentBranch()
-		fmt.Printf("1. The commit has been created. Push when ready: git push origin %s\n", branch)
-	}
-	
+
 	if options.NoPush {
-		fmt.Printf("2. Push the tag when ready: git push origin %s\n", newVersion)
+		fmt.Println("Next steps:")
+		
+		if !options.NoCommit {
+			branch, _ := o.gitCmd.CurrentBranch()
+			fmt.Printf("1. Push the commit when ready: git push origin %s\n", branch)
+		}
+		
+		fmt.Printf("2. Push the tag when ready: git push origin %s --force\n", newVersion)
+		fmt.Println("3. Create a GitHub release manually or run: gh release create " + newVersion)
+	} else {
+		// Everything was pushed automatically
+		fmt.Println("The release process is complete!")
+		fmt.Println()
+		fmt.Println("GitHub Actions is now building your release. You can:")
+		fmt.Println("- Check the build progress in GitHub Actions")
+		fmt.Printf("- View the release at: https://github.com/USERNAME/REPO/releases/tag/%s\n", newVersion)
 	}
+}
+
+func (o *Orchestrator) createGitHubRelease(version string, options Options) error {
+	title := fmt.Sprintf("Release %s", version)
+	notes := fmt.Sprintf("## Release %s\n\nAutomated release created by bumpr.", version)
 	
-	fmt.Println("3. Check GitHub Actions for the automated build")
-	fmt.Printf("4. Once build completes, the release will be available at:\n")
-	fmt.Printf("   https://github.com/USERNAME/REPO/releases/tag/%s\n", newVersion)
+	return o.githubCmd.CreateRelease(version, title, notes)
 }

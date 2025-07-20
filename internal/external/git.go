@@ -41,6 +41,12 @@ func (g *GitCommands) PushTag(tagName string) error {
 	return err
 }
 
+func (g *GitCommands) PushTagWithForce(tagName string) error {
+	args := []string{"push", "origin", tagName, "--force"}
+	_, err := g.runner.Run(context.Background(), "git", args...)
+	return err
+}
+
 func (g *GitCommands) Push(branch string) error {
 	args := []string{"push", "origin", branch}
 	_, err := g.runner.Run(context.Background(), "git", args...)
