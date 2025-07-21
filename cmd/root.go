@@ -60,6 +60,20 @@ var versionCmd = &cobra.Command{
 	},
 }
 
+var republishCmd = &cobra.Command{
+	Use:   "republish",
+	Short: "Republish the current version (removes and recreates tags/releases)",
+	Long: `Republish the current version without incrementing it.
+This command will:
+- Remove existing local and remote tags
+- Delete the GitHub release if it exists
+- Recreate the tag and push it
+- Create a new GitHub release`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runRelease("republish")
+	},
+}
+
 func init() {
 	flags := rootCmd.PersistentFlags()
 	flags.BoolVarP(&dryRun, "dry-run", "n", false, "Preview changes without execution")
@@ -74,6 +88,7 @@ func init() {
 	rootCmd.AddCommand(minorCmd)
 	rootCmd.AddCommand(majorCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(republishCmd)
 }
 
 func getVersion() string {

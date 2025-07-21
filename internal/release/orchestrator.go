@@ -65,21 +65,31 @@ func (o *Orchestrator) Execute(options Options) error {
 		return fmt.Errorf("failed to get current version: %w", err)
 	}
 
-	// Parse bump type
-	bumpType, err := version.ParseBumpType(options.BumpType)
-	if err != nil {
-		return err
-	}
-
 	// Calculate new version
-	newVersion, err := version.Bump(currentVersion, bumpType)
-	if err != nil {
-		return fmt.Errorf("failed to bump version: %w", err)
+	var newVersion string
+	if options.BumpType == "republish" {
+		// For republish, use the current version
+		newVersion = currentVersion
+	} else {
+		// Parse bump type
+		bumpType, err := version.ParseBumpType(options.BumpType)
+		if err != nil {
+			return err
+		}
+		
+		newVersion, err = version.Bump(currentVersion, bumpType)
+		if err != nil {
+			return fmt.Errorf("failed to bump version: %w", err)
+		}
 	}
 
 	if !options.Quiet {
-		fmt.Printf("📊 Current version: %s\n", currentVersion)
-		fmt.Printf("📈 New version: %s\n\n", newVersion)
+		if options.BumpType == "republish" {
+			fmt.Printf("🔄 Republishing version: %s\n\n", currentVersion)
+		} else {
+			fmt.Printf("📊 Current version: %s\n", currentVersion)
+			fmt.Printf("📈 New version: %s\n\n", newVersion)
+		}
 	}
 
 	if options.DryRun {
@@ -87,17 +97,19 @@ func (o *Orchestrator) Execute(options Options) error {
 		return nil
 	}
 
-	// Update version file
-	if err := source.SetVersion(sourceFile, newVersion); err != nil {
-		return fmt.Errorf("failed to update version: %w", err)
+	// Update version file (skip for republish)
+	if options.BumpType != "republish" {
+		if err := source.SetVersion(sourceFile, newVersion); err != nil {
+			return fmt.Errorf("failed to update version: %w", err)
+		}
+
+		if !options.Quiet {
+			fmt.Printf("✅ Updated %s with new version\n", filepath.Base(sourceFile))
+		}
 	}
 
-	if !options.Quiet {
-		fmt.Printf("✅ Updated %s with new version\n", filepath.Base(sourceFile))
-	}
-
-	// Git operations
-	if !options.NoCommit {
+	// Git operations (skip commit for republish)
+	if !options.NoCommit && options.BumpType != "republish" {
 		if err := o.gitCmd.Add(sourceFile); err != nil {
 			return fmt.Errorf("failed to stage file: %w", err)
 		}
@@ -129,9 +141,18 @@ func (o *Orchestrator) Execute(options Options) error {
 	}
 
 	// Tag operations
-	if err := o.cleanupExistingTag(newVersion, options); err != nil {
-		if !options.Quiet {
-			fmt.Printf("⚠️  Warning: failed to cleanup existing tag: %v\n", err)
+	if options.BumpType == "republish" {
+		// For republish, we need to be more aggressive with cleanup
+		if err := o.forceCleanupTagAndRelease(newVersion, options); err != nil {
+			if !options.Quiet {
+				fmt.Printf("⚠️  Warning: failed to cleanup existing tag/release: %v\n", err)
+			}
+		}
+	} else {
+		if err := o.cleanupExistingTag(newVersion, options); err != nil {
+			if !options.Quiet {
+				fmt.Printf("⚠️  Warning: failed to cleanup existing tag: %v\n", err)
+			}
 		}
 	}
 
@@ -238,14 +259,20 @@ func (o *Orchestrator) showDryRunCommands(sourceFile, newVersion string, options
 	fmt.Println("🔍 Dry run mode - commands that would be executed:")
 	fmt.Println()
 	
-	fmt.Printf("→ Update %s with version %s\n", filepath.Base(sourceFile), newVersion)
-	
-	if !options.NoCommit {
-		fmt.Printf("→ git add %s\n", sourceFile)
-		fmt.Printf("→ git commit -m \"releasing %s\"\n", newVersion)
+	if options.BumpType == "republish" {
+		if !options.NoPush && o.githubCmd.IsAvailable() {
+			fmt.Printf("→ gh release delete %s --yes (if exists)\n", newVersion)
+		}
+	} else {
+		fmt.Printf("→ Update %s with version %s\n", filepath.Base(sourceFile), newVersion)
 		
-		if !options.NoPush {
-			fmt.Println("→ git push origin <current-branch>")
+		if !options.NoCommit {
+			fmt.Printf("→ git add %s\n", sourceFile)
+			fmt.Printf("→ git commit -m \"releasing %s\"\n", newVersion)
+			
+			if !options.NoPush {
+				fmt.Println("→ git push origin <current-branch>")
+			}
 		}
 	}
 	
@@ -303,4 +330,31 @@ func (o *Orchestrator) createGitHubRelease(version string, options Options) erro
 	notes := fmt.Sprintf("## Release %s\n\nAutomated release created by bumpr.", version)
 	
 	return o.githubCmd.CreateRelease(version, title, notes)
+}
+
+func (o *Orchestrator) forceCleanupTagAndRelease(tagName string, options Options) error {
+	if options.Verbose && !options.Quiet {
+		fmt.Printf("🧹 Force cleaning up tag and release %s...\n", tagName)
+	}
+	
+	// Delete GitHub release first if gh is available
+	if !options.NoPush && o.githubCmd.IsAvailable() {
+		if err := o.githubCmd.DeleteRelease(tagName); err != nil {
+			if options.Verbose && !options.Quiet {
+				fmt.Printf("   Failed to delete GitHub release: %v\n", err)
+			}
+		} else if !options.Quiet {
+			fmt.Printf("🗑️  Deleted GitHub release %s\n", tagName)
+		}
+	}
+	
+	// Delete local tag
+	o.gitCmd.DeleteLocalTag(tagName)
+	
+	// Delete remote tag
+	if !options.NoPush {
+		o.gitCmd.DeleteRemoteTag(tagName)
+	}
+	
+	return nil
 }

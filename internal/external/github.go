@@ -40,3 +40,17 @@ func (g *GitHubCommands) GetReleaseURL(tagName string) (string, error) {
 	}
 	return result.Stdout, nil
 }
+
+func (g *GitHubCommands) DeleteRelease(tagName string) error {
+	// First check if the release exists
+	_, err := g.runner.Run(context.Background(), "gh", "release", "view", tagName)
+	if err != nil {
+		// Release doesn't exist, that's fine
+		return nil
+	}
+	
+	// Delete the release
+	args := []string{"release", "delete", tagName, "--yes"}
+	_, err = g.runner.Run(context.Background(), "gh", args...)
+	return err
+}
